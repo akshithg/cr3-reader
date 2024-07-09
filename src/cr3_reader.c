@@ -1,20 +1,19 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
+#include <linux/kprobes.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
 #include <linux/fs.h>
-#include <linux/timer.h>
-#include <linux/jiffies.h>
-#include <linux/smp.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("gee");
-MODULE_DESCRIPTION("A module to periodically read CR3 register and process info of current process on all CPUs, excluding swapper process");
+MODULE_DESCRIPTION("A module to read CR3 register and process info whenever a new process is executed");
 
-static struct timer_list my_timer;
+static struct kprobe kp_execve;
+static struct kprobe kp_execveat;
 
-void read_cr3_on_cpu(void *info)
+static int handler_pre(struct kprobe *p, struct pt_regs *regs)
 {
     unsigned long cr3;
     struct mm_struct *mm;
@@ -22,7 +21,7 @@ void read_cr3_on_cpu(void *info)
 
     if (current->pid == 0) {
         // Skip the swapper process
-        return;
+        return 0;
     }
 
     cpu = smp_processor_id();
@@ -30,11 +29,12 @@ void read_cr3_on_cpu(void *info)
     // Use inline assembly to read the CR3 register
     asm volatile("mov %%cr3, %0" : "=r" (cr3));
 
-    printk(KERN_INFO "[cr3reader] CPU %d: CR3: %lx\n", cpu, cr3);
+    printk(KERN_INFO "[cr3reader] CPU %d: CR3 value for current process: %lx\n", cpu, cr3);
 
-    if ((mm = current->mm) != NULL) {
+    mm = current->mm;
+    if (mm) {
         unsigned long pgd = (unsigned long)mm->pgd;
-        printk(KERN_INFO "[cr3reader] CPU %d: PGD: %lx\n", cpu, pgd);
+        printk(KERN_INFO "[cr3reader] CPU %d: PGD (CR3 equivalent) for current process: %lx\n", cpu, pgd);
 
         // Get the executable file path
         if (mm->exe_file) {
@@ -46,34 +46,43 @@ void read_cr3_on_cpu(void *info)
     }
 
     printk(KERN_INFO "[cr3reader] CPU %d: Process name: %s\n", cpu, current->comm);
-}
 
-void read_cr3_and_process_info(struct timer_list *t)
-{
-    // Run the read_cr3_on_cpu function on all CPUs
-    on_each_cpu(read_cr3_on_cpu, NULL, 1);
-
-    // Re-arm the timer to fire again in 5 seconds
-    mod_timer(&my_timer, jiffies + msecs_to_jiffies(5000));
+    return 0;
 }
 
 static int __init cr3_read_init(void)
 {
+    int ret;
     printk(KERN_INFO "[cr3reader] CR3 reader module loaded\n");
 
-    // Initialize the timer
-    timer_setup(&my_timer, read_cr3_and_process_info, 0);
+    kp_execve.pre_handler = handler_pre;
+    kp_execve.symbol_name = "do_execve";
 
-    // Schedule the first execution of the timer
-    mod_timer(&my_timer, jiffies + msecs_to_jiffies(5000));
+    ret = register_kprobe(&kp_execve);
+    if (ret < 0) {
+        printk(KERN_ERR "[cr3reader] register_kprobe for do_execve failed, returned %d\n", ret);
+        return ret;
+    }
 
+    kp_execveat.pre_handler = handler_pre;
+    kp_execveat.symbol_name = "do_execveat";
+
+    ret = register_kprobe(&kp_execveat);
+    if (ret < 0) {
+        printk(KERN_ERR "[cr3reader] register_kprobe for do_execveat failed, returned %d\n", ret);
+        unregister_kprobe(&kp_execve);
+        return ret;
+    }
+
+    printk(KERN_INFO "[cr3reader] Kprobes registered\n");
     return 0;
 }
 
 static void __exit cr3_read_exit(void)
 {
-    // Remove the timer if it's still active
-    del_timer(&my_timer);
+    unregister_kprobe(&kp_execve);
+    unregister_kprobe(&kp_execveat);
+    printk(KERN_INFO "[cr3reader] Kprobes unregistered\n");
     printk(KERN_INFO "[cr3reader] CR3 reader module unloaded\n");
 }
 
