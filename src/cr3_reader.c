@@ -85,3 +85,4 @@ static void __exit cr3_read_exit(void)
 }
 
 module_init(cr3_read_init);
+module_exit(cr3_read_exit);
