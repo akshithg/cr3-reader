@@ -33,19 +33,17 @@ static int handler_pre(struct kprobe *p, struct pt_regs *regs)
 
     mm = current->mm;
     if (mm) {
-        unsigned long pgd = (unsigned long)mm->pgd;
-        printk(KERN_INFO "[cr3reader] CPU %d: PGD (CR3 equivalent) for current process: %lx\n", cpu, pgd);
-
         // Get the executable file path
         if (mm->exe_file) {
             char buffer[256];
             struct path exe_path_struct = mm->exe_file->f_path;
             char *path_buffer = d_path(&exe_path_struct, buffer, sizeof(buffer));
-            printk(KERN_INFO "[cr3reader] CPU %d: Executable path: %s\n", cpu, path_buffer);
+            printk(KERN_INFO "[cr3reader] cpu: %d cr3: %lx exe: %s\n", cpu, cr3, path_buffer);
         }
     }
-
-    printk(KERN_INFO "[cr3reader] CPU %d: Process name: %s\n", cpu, current->comm);
+    else {
+        printk(KERN_INFO "[cr3reader] cpu: %d cr3: %lx", cpu, cr3);
+    }
 
     return 0;
 }
@@ -87,4 +85,3 @@ static void __exit cr3_read_exit(void)
 }
 
 module_init(cr3_read_init);
-module_exit(cr3_read_exit);
