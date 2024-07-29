@@ -4,13 +4,20 @@ obj-m += cr3_reader.o
 
 .PHONY: all clean install uninstall
 
-all: clean build
+#set KERNELDIR using command line
+KERNELDIR ?= /lib/modules/$(shell uname -r)/build
+
+
+all: clean echo build
+
+echo:
+	echo $(KERNELDIR)
 
 build:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
+	make -C $(KERNELDIR) M=$(PWD) modules
 
 clean:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
+	make -C $(KERNELDIR) M=$(PWD) clean
 
 in:
 	sudo insmod cr3_reader.ko
